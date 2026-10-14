@@ -1,0 +1,93 @@
+getting started
+how to bootstrap coff and smed from source and compile a first c0 program.
+<h2>what you need</h2>
+<p>
+  linux on x86-64, bash for the scripts and, for the very first build only, a
+  C compiler with <code>as</code> and <code>ld</code> from binutils. tcc is the
+  recommended C compiler. gcc gives a byte-identical result, but tcc can itself
+  be built from a seed small enough to check by hand and gcc cannot, which
+  <a href="https://github.com/cofflang/coff/blob/main/TRUST.md"><code>TRUST.md</code></a> in the repository explains.
+</p>
+<pre><code>git clone https://github.com/cofflang/coff.git
+cd coff</code></pre>
+
+<h2>building</h2>
+<p>
+  the build happens in four steps. each one uses what the step before it made.
+</p>
+<pre><code># 1. the seed compiler, in plain C
+tcc -o coff0 coff0.c
+
+# 2. the real compiler, written in c0, built by the seed
+./coff0 c0/coff.c0 coff1.s
+as coff1.s -o coff1.o
+ld coff1.o -o coff1
+
+# 3. the assembler and linker, built by the real compiler
+./coff1 c0/smed.c0 smed.s
+as smed.s -o smed.o
+ld smed.o -o smed
+
+# 4. smed rebuilds itself, so the binary you keep is its own output
+./smed smed.s smed.new
+mv smed.new smed
+chmod +x smed</code></pre>
+<p>
+  the fourth step matters. the smed from step three was made by
+  <code>as</code> and <code>ld</code>, the very tools this repository exists to
+  stop depending on. smed never picks the short encodings binutils picks, so
+  its own build of the same assembly is a different binary. one more pass
+  through itself reaches a fixpoint at once. that is the binary the audit
+  expects to find. the temporary name is because linux will not let a program
+  write over its own running executable.<span class="sn"><label class="sn-marker" for="sn-start-2">†</label><input type="checkbox" id="sn-start-2" class="sn-toggle"><span class="sidenote">after step four you never need the C compiler, <code>as</code> or <code>ld</code> again. the test scripts still use them, the C compiler to rebuild the seed and binutils as the reference smed is compared against.</span></span>
+</p>
+
+<h2>a first program</h2>
+<pre><code>// hello.c0
+int main() {
+    print("hello from c0\n");
+    return 0;
+}</code></pre>
+<pre><code>./coff1 hello.c0 hello.s
+./smed hello.s hello
+chmod +x hello
+./hello</code></pre>
+<p>
+  the exit code of the process is whatever <code>main</code> returns. smed
+  writes a plain file, so setting the executable bit is up to you.
+</p>
+
+<h2>usage</h2>
+<pre><code>coff1 [--elf] [-I dir]... input.c0 output.s
+smed [-T linker.ld] [--base addr] [-m symbols.map] input.s [more.s ...] output</code></pre>
+<dl class="opts">
+  <dt><code>-I dir</code></dt>
+  <dd>another directory to look in for an include that is not next to the file including it. it can be given more than once.</dd>
+  <dt><code>--elf</code></dt>
+  <dd>write assembly for moonshot instead of linux.</dd>
+  <dt><code>-T linker.ld</code></dt>
+  <dd>lay the output out by a GNU ld linker script.</dd>
+  <dt><code>--base addr</code></dt>
+  <dd>the load address, when no script gives one.</dd>
+  <dt><code>-m symbols.map</code></dt>
+  <dd>also write every symbol with its address, handy for comparing a layout with another linker's.</dd>
+</dl>
+<p>
+  smed assembles and links every input together in the order given. coff1
+  with no file arguments reads source on standard input and writes assembly to
+  standard output, which is the form the test harness uses.
+</p>
+
+<h2>running the tests</h2>
+<pre><code>./run_tests.sh         # the compiler suite, over five hundred checks
+./smed_tests.sh        # smed against binutils, then the suite with no GNU tool
+./verify_bootstrap.sh  # the trusting-trust audit</code></pre>
+<p>
+  every test program goes through the real pipeline and has its exit code
+  checked, plus its exact output or exact error message where the test says
+  what those should be. then each stage written in c0 is compared byte for byte
+  with the seed compiler over the whole corpus. last comes the fixpoint, the
+  compiler compiling itself three generations deep with every generation
+  identical. <code>CC=tcc ./run_tests.sh</code> runs the same suite with gcc
+  absent from the machine.
+</p>

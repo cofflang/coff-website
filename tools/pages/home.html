@@ -1,0 +1,27 @@
+coff
+coff: the self-hosted compiler for c0, its assembler and linker smed, the language reference and the trusting-trust audit that holds the toolchain honest.
+<p>
+  coff is a compiler for c0, a small systems language, written in c0 itself
+  and built so that every binary on the way from a readable seed to a running
+  program can be checked. c0 looks like a C with most of C taken away. it has
+  one type, the 64-bit integer, no standard library and nothing running
+  underneath a program except the operating system it asks things of. coff compiles it straight
+  to x86-64 assembly. smed, the assembler and linker that comes with it, turns
+  that into an executable. both are written in c0 and both build themselves,
+  so once the first copy exists no outside compiler, assembler or linker is
+  on the path from source to program.
+</p>
+<pre><code>int main() {
+    print("hello from c0\n");
+    return 0;
+}</code></pre>
+<p>
+  the language exists to write <a href="{moon}">moonshot</a>, an operating
+  system built from close to nothing. it grows only when moonshot needs
+  something it cannot say yet. that keeps it small enough for one person to
+  hold in their head. it also keeps the compiler small enough to check, which
+  is the other half of the project. a compiler decides what actually runs, so
+  a compiler nobody can verify is a place a backdoor can live without ever
+  showing up in any source file. most of what is in the repository besides
+  the compiler is there to rule that out, or to say plainly where it cannot.
+</p>
