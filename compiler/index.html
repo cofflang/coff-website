@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>coff · the compiler</title>
+<meta name="description" content="how coff works: self-hosting, the coff0 seed compiler, the pipeline, code generation, the moonshot target, error messages and testing.">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<div class="frame">
+
+<nav class="side" aria-label="contents">
+<a class="brand" href="../index.html"><img src="../favicon.svg" alt="" width="28" height="28">coff</a>
+<ul class="toc">
+<li><a href="../index.html">overview</a>
+</li>
+<li><a href="../start/index.html">getting started</a>
+</li>
+<li><a href="../releases/index.html">releases</a>
+</li>
+<li class="group">reference</li>
+<li><a href="../language/index.html">the c0 language</a>
+</li>
+<li><a href="../compiler/index.html" aria-current="page">the compiler</a>
+</li>
+<li><a href="../smed/index.html">smed, assembler and linker</a>
+</li>
+</ul>
+<p class="side-foot">written by <a href="https://tavro.se">tavro</a><br>part of <a href="https://cofflang.github.io/moonshot-website/">moonshot</a><br>source on <a href="https://github.com/cofflang/coff">github</a></p>
+</nav>
+
+<main class="page">
+<p class="crumb"><a href="../index.html">coff</a> / compiler</p>
+<h1>the compiler</h1>
+<h2 id="self-hosted"><span class="num">1</span>self-hosted</h2>
+<p>
+  coff is written in c0 and compiles its own source. the binary built from
+  <code>c0/coff.c0</code> is called <code>coff1</code>. it is the compiler
+  everything is built with, moonshot's kernel included. that the compiler
+  compiles itself is not proof that it is correct, since a wrong compiler can
+  reproduce itself just as faithfully as a right one. what keeps it honest is
+  the seed compiler it is compared against.
+  <a href="https://github.com/cofflang/coff/blob/main/TRUST.md"><code>TRUST.md</code></a> in the repository goes into what
+  the self-compiling does and does not prove.
+</p>
+
+<h2 id="coff0-the-seed"><span class="num">2</span>coff0, the seed</h2>
+<p>
+  a compiler written in its own language cannot compile itself the first
+  time. something else has to. that something is <code>coff0</code>, a
+  compiler for the same language written in plain C, about 3,200 lines with no
+  build system and no dependencies past the C library. it builds the first
+  coff1. from then on it is the reference. every program in the test
+  corpus is compiled by both. the two outputs have to match byte for
+  byte, error messages included.
+</p>
+<p>
+  coff0 is kept small on purpose. small means any C compiler can build it,
+  which is what makes it possible to build it with several unrelated ones and
+  compare. small also means one person can read all of it. so it does not get
+  retired even though coff1 has long outgrown the need for it. every
+  language feature is written into it first.
+</p>
+
+<h2 id="inside-the-compiler"><span class="num">3</span>inside the compiler</h2>
+<p>
+  coff is a straight pipeline with no stage that loops back.
+</p>
+<ol class="chain">
+  <li><span>include</span><span class="what">every included file is pasted in, giving one flat buffer of source</span></li>
+  <li><span>lexer</span><span class="what">the buffer becomes tokens</span></li>
+  <li><span>parser</span><span class="what">the tokens become the whole program as a tree</span></li>
+  <li><span>resolve</span><span class="what">names are matched to variables, functions and layout fields while mistakes are reported</span></li>
+  <li><span>code generation</span><span class="what">the tree becomes x86-64 assembly text</span></li>
+  <li><span>smed</span><span class="what">the text becomes an executable, see <a href="../smed/index.html">smed</a></span></li>
+</ol>
+<p>
+  the output is assembly text rather than machine code because text can be
+  diffed. two compilers that agree on every character of their assembly agree
+  on everything that matters. a disagreement points at the line where it
+  starts.
+</p>
+
+<h2 id="code-generation"><span class="num">4</span>code generation</h2>
+<p>
+  the code generator is a stack machine at heart. a value is worked out into
+  <code>rax</code>, the left side of an operator waits on the stack while the
+  right side is worked out. the two meet in a register. that is simple to
+  check and slow, so coff takes a few shortcuts when the shape of the code
+  makes them safe. there is no separate optimizer pass, since a pass that
+  rewrites finished assembly has to guess which registers are still in use,
+  and a guess is a place for a bug to live.
+</p>
+<ul class="plain">
+  <li>a number or a variable on the right of an operator goes straight into a register instead of round the stack.</li>
+  <li>a comparison used as a condition jumps on the processor's flags instead of making a 0 or 1 first. <code>&amp;&amp;</code> and <code>||</code> do the same.</li>
+  <li>a number that fits in 32 bits is written into the instruction itself.</li>
+  <li>for an operator where order does not matter, the side that is simple to load is loaded last.</li>
+  <li>a call loads simple arguments straight into the registers they travel in.</li>
+</ul>
+<p>
+  coff0 takes exactly the same shortcuts, so the two still agree byte for
+  byte. moonshot's kernel came out a fifth smaller and a frame of its graphics
+  benchmark takes a third less time. each shortcut has a test written to
+  catch it going wrong. each test was broken on purpose to see that it
+  does. the suite as it stood before missed a wrong <code>&lt;=</code>
+  jump completely, which is why that matters.
+</p>
+
+<h2 id="two-targets"><span class="num">5</span>two targets</h2>
+<p>
+  by default coff writes assembly for linux, with linux system call numbers.
+  with <code>--elf</code> it writes the same assembly for moonshot's ring 3,
+  where user programs run. three things differ. a program exits through
+  moonshot's own exit call, <code>print</code> goes to the kernel's debug
+  output and <code>alloc</code> asks the kernel for memory from the process's
+  own heap. on top of that come the moonshot builtins listed on the
+  <a href="../language/index.html">language</a> page. the linux file
+  and port builtins are refused.
+</p>
+<p>
+  smed then links it with <code>--base 0x80000000</code>, where moonshot maps
+  user programs. that address is above two gigabytes, which is why smed
+  reaches a global through the instruction pointer instead of through an
+  absolute address. the processor sign-extends an absolute 32-bit address, so
+  it cannot see the second gigabyte at all. the first program built this
+  way died on its first store.
+</p>
+
+<h2 id="one-backend-on-purpose"><span class="num">6</span>one backend, on purpose</h2>
+<p>
+  <code>--elf</code> is a handful of emitted lines that differ in a system call
+  number. coff0 has the same flag. it is diffed like everything else, so a
+  program for moonshot gets exactly the checking a program for linux gets.<span class="sn"><label class="sn-marker" for="sn-compiler-3">†</label><input type="checkbox" id="sn-compiler-3" class="sn-toggle"><span class="sidenote">it was not always so. coff once had a second backend that wrote machine code byte by byte for moonshot, with its own labels, its own call patching and its own ELF writer. coff0 never had one, so no comparison ever looked at it. the whole test suite proved nothing about the path every ring-3 program took. three silent wrong-code bugs were found in it by eye while the suite stayed green. once smed existed the fix was to delete that backend rather than to test it, which took five hundred lines out of the compiler.</span></span>
+</p>
+
+<h2 id="error-messages"><span class="num">7</span>error messages</h2>
+<pre><code>coff1: hello.c0:3: undeclared variable 'y'</code></pre>
+<p>
+  a program with a mistake in it gets the file, the line and a message.
+  coff1 says word for word what coff0 says. that is checked rather than hoped
+  for. every program in the test suite that is meant to fail goes through both
+  compilers. the run fails if the messages differ once each compiler's own
+  name is taken off the front. there are sixty-two of them, enough that every
+  message either compiler can give is triggered at least once. two compilers
+  can agree while both point at the wrong line, so seventeen of them also have
+  the exact message they must give written down beside them.
+</p>
+<p>
+  the line is the harder part. <code>include</code> pastes every file into one
+  buffer before the lexer starts, so a position in that buffer says nothing
+  about which file it came from. the include step leaves a small table behind
+  with one entry for every place it started copying from a file. the lexer
+  walks it as it reads. a mistake on line 97 of a file the kernel pulls in
+  comes out as that file and line 97, from both compilers.
+</p>
+
+<h2 id="how-it-is-tested"><span class="num">8</span>how it is tested</h2>
+<p>
+  <code>run_tests.sh</code> runs over five hundred checks. every test program
+  is compiled, assembled, linked and run. its exit code is compared with
+  what the test expects, plus its exact output or exact error where the test
+  says. then the lexer, the parser and the compiler written in c0 are each
+  compared byte for byte with coff0 over the whole corpus, which includes
+  moonshot's kernel when it is checked out next to coff. last comes the
+  fixpoint, the compiler compiling itself three generations deep with every
+  generation identical.
+</p>
+<p>
+  what no comparison can show is that a program behaves right once it runs on
+  moonshot, only that both compilers agree about it. that is covered in
+  moonshot's own tree, by small programs whose exit code only comes out right
+  if the code generator is right. they cover chained control flow,
+  short-circuit operators with a side effect that proves the right side was
+  skipped, all six argument registers, recursion, layouts, reading files, the
+  kernel's font and globals holding a function to call through.
+</p>
+</main>
+
+</div>
+</body>
+</html>

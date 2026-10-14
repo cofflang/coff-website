@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>coff · the c0 language</title>
+<meta name="description" content="reference for c0: its one type, statements, operators, layouts, includes and every builtin, as of coff v0.6.0.">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<div class="frame">
+
+<nav class="side" aria-label="contents">
+<a class="brand" href="../index.html"><img src="../favicon.svg" alt="" width="28" height="28">coff</a>
+<ul class="toc">
+<li><a href="../index.html">overview</a>
+</li>
+<li><a href="../start/index.html">getting started</a>
+</li>
+<li><a href="../releases/index.html">releases</a>
+</li>
+<li class="group">reference</li>
+<li><a href="../language/index.html" aria-current="page">the c0 language</a>
+</li>
+<li><a href="../compiler/index.html">the compiler</a>
+</li>
+<li><a href="../smed/index.html">smed, assembler and linker</a>
+</li>
+</ul>
+<p class="side-foot">written by <a href="https://tavro.se">tavro</a><br>part of <a href="https://cofflang.github.io/moonshot-website/">moonshot</a><br>source on <a href="https://github.com/cofflang/coff">github</a></p>
+</nav>
+
+<main class="page">
+<p class="crumb"><a href="../index.html">coff</a> / language</p>
+<h1>the c0 language</h1>
+<h2 id="one-type"><span class="num">1</span>one type</h2>
+<p>
+  c0 has a single value type, <code>int</code>, a 64-bit signed integer.
+  numbers, characters, truth values, addresses, strings and functions are all
+  an <code>int</code>. a string literal is the address of its bytes, a function
+  name used as a value is the address of the function and memory is reached by
+  passing an address to a builtin. there is no unsigned type and no array type.<span class="sn"><label class="sn-marker" for="sn-language-1">†</label><input type="checkbox" id="sn-language-1" class="sn-toggle"><span class="sidenote">division is signed and rounds toward zero, so code that packs bits into a value keeps them where the sign bit cannot get in the way, or uses the shifts and masks instead of division.</span></span>
+</p>
+
+<h2 id="a-program"><span class="num">2</span>a program</h2>
+<p>
+  a program is global variables, functions and declarations, in any order.
+  it starts at <code>main</code>, which takes nothing and returns an
+  <code>int</code> that becomes the exit code of the process. there is no
+  runtime underneath it. the code coff emits starts with a few instructions
+  that call <code>main</code> and exit with what it returned.
+</p>
+<pre><code>int total = 0;
+
+int add(int a, int b) {
+    return a + b;
+}
+
+int main() {
+    for (int i = 0; i &lt; 5; i += 1) {
+        total = add(total, i);
+    }
+    return total;
+}</code></pre>
+<h3>function</h3>
+<pre><code>int name(int a, int b) { ... }
+void name() { ... }
+(int, int) name(int a) { ... }</code></pre>
+<p>
+  a function takes up to sixteen parameters. the first six arrive in
+  registers and the rest on the stack. functions can recurse. a
+  <code>void</code> function returns with a bare <code>return;</code>. a
+  function declared to return <code>(int, int)</code> hands back two values, see
+  below.
+</p>
+<h3>variable</h3>
+<pre><code>int x;
+int y = x + 1;
+Point p = alloc(sizeof(Point));</code></pre>
+<p>
+  a variable outside a function is a global and lives for the whole run. one
+  inside a block lives until the end of that block and may shadow a name from
+  outside it. a global's initializer can be any constant expression, which
+  the compiler works out. instead of <code>int</code> a variable can be given a
+  layout's name as its type, explained under layouts.
+</p>
+
+<h2 id="statements"><span class="num">3</span>statements</h2>
+<h3>if</h3>
+<pre><code>if (condition) statement
+if (condition) statement else statement</code></pre>
+<p>a condition is true when it is not zero.</p>
+<h3>while</h3>
+<pre><code>while (condition) statement</code></pre>
+<h3>for</h3>
+<pre><code>for (init; condition; step) statement</code></pre>
+<p>
+  <code>init</code> runs once and may declare a variable, which then belongs to
+  the loop alone. the statement runs while the condition holds. the step
+  runs after every pass. <code>continue</code> in a <code>for</code> goes on to
+  the step, the same as in C, so it cannot skip the increment by accident.
+</p>
+<h3>break and continue</h3>
+<pre><code>break;
+continue;</code></pre>
+<p>leave the innermost loop, or go straight to its next pass.</p>
+<h3>assignment</h3>
+<pre><code>x = expression;
+buf[i] = expression;
+e.field = expression;
+x += 1;   x -= n;   x *= 2;   x /= 2;   x %= 10;</code></pre>
+<p>
+  assignment is a statement and not an expression, so it cannot hide inside
+  a condition. <code>x += n</code> means exactly <code>x = x + (n)</code>. the rest of
+  the family works the same way.
+</p>
+<h3>two return values</h3>
+<pre><code>(int, int) divide(int a, int b) {
+    return a / b, a % b;
+}
+
+q, r = divide(17, 5);</code></pre>
+<p>
+  a function can return two values, which travel in two registers. such a
+  function has to return two values on every path. its result can only be
+  taken apart into two variables, never used as a plain value. this replaced
+  a habit of passing results out through globals.
+</p>
+<h3>defer</h3>
+<pre><code>int load(int name) {
+    int buf = 0;
+    defer dealloc(buf);
+    buf = alloc(4096);
+    if (readfile(name, buf, 4096) &lt; 0) { return 0 - 1; }
+    return parse(buf);
+}</code></pre>
+<p>
+  <code>defer statement;</code> runs the statement every time the function
+  returns, deferred statements last-written first. it is decided when the
+  program is compiled, not as it runs. a <code>defer</code> runs even if it sat
+  under an <code>if</code> that was false, even on a <code>return</code>
+  that comes before it in the text. its expressions are worked out at the
+  moment it runs, so it sees variables as they are then. that is why the
+  example sets <code>buf</code> to 0 first, since giving back 0 does nothing.
+  a deferred statement may not itself return, break, continue or defer.
+</p>
+<h3>return</h3>
+<pre><code>return;
+return expression;
+return a, b;</code></pre>
+<p>
+  a call on its own, <code>f(1);</code>, is a statement too. a block in
+  braces groups statements wherever one is expected.
+</p>
+
+<h2 id="operators"><span class="num">4</span>operators</h2>
+<p>
+  the operators are C's and they bind the way C binds them, the odd parts
+  included. tightest first.
+</p>
+<div class="table-wrap">
+<table>
+  <tr><th>operators</th><th>meaning</th></tr>
+  <tr><td><code>f(x)</code> <code>buf[i]</code> <code>e.field</code></td><td>call, byte at <code>buf + i</code>, field of a layout</td></tr>
+  <tr><td><code>-x</code> <code>!x</code> <code>~x</code></td><td>negation, 1 when <code>x</code> is 0 and 0 otherwise, bitwise not</td></tr>
+  <tr><td><code>*</code> <code>/</code> <code>%</code></td><td>multiply, divide rounding toward zero, remainder with the sign of the left side</td></tr>
+  <tr><td><code>+</code> <code>-</code></td><td>add, subtract</td></tr>
+  <tr><td><code>&lt;&lt;</code> <code>&gt;&gt;</code></td><td>shifts, <code>&gt;&gt;</code> keeps the sign of a negative number</td></tr>
+  <tr><td><code>&lt;</code> <code>&lt;=</code> <code>&gt;</code> <code>&gt;=</code></td><td>comparisons, 1 or 0</td></tr>
+  <tr><td><code>==</code> <code>!=</code></td><td>equality, 1 or 0</td></tr>
+  <tr><td><code>&amp;</code></td><td>bitwise and, looser than <code>==</code> just like in C</td></tr>
+  <tr><td><code>^</code></td><td>bitwise exclusive or</td></tr>
+  <tr><td><code>|</code></td><td>bitwise or</td></tr>
+  <tr><td><code>&amp;&amp;</code></td><td>and, the right side only evaluated when it decides the answer</td></tr>
+  <tr><td><code>||</code></td><td>or, the same way</td></tr>
+</table>
+</div>
+<p>
+  <code>-7 % 2</code> is <code>-1</code>, as in C. there is no
+  <code>++</code>, no <code>?:</code> and no comma operator.
+</p>
+
+<h2 id="literals-and-comments"><span class="num">5</span>literals and comments</h2>
+<p>
+  integers in decimal or hex (<code>255</code>, <code>0xFF</code>), characters
+  (<code>'a'</code>, <code>'\n'</code>) and strings
+  (<code>"hello\n"</code>), with the escapes <code>\n</code>, <code>\t</code>,
+  <code>\\</code> and <code>\"</code>. a string is stored
+  with a zero byte after it and its value is its address.
+  <code>//</code> starts a comment that runs to the end of the line.
+</p>
+
+<h2 id="layouts"><span class="num">6</span>layouts</h2>
+<p>
+  c0 has no structs. it has <code>layout</code>, which gives names to a run of
+  8-byte offsets, so <code>store64(e + 16, v)</code> can be written
+  <code>e.vx = v</code>. a layout makes no new kind of value. everything is
+  still an <code>int</code>. a field is a load or a store at an offset.
+</p>
+<pre><code>layout Entity {
+    int x;
+    int y;
+    int vx;
+    int vy;
+}
+
+int main() {
+    Entity e = alloc(sizeof(Entity));
+    e.x = 10;
+    e.vx = 1;
+    return e.x + e.vx;
+}</code></pre>
+<p>
+  <code>sizeof(Entity)</code> is the field count times 8, known when the
+  program is compiled. a variable declared with a layout's name, like
+  <code>Entity e</code> above, has its fields looked up in that layout. a
+  field the layout does not have is a compile error. a variable declared
+  plain <code>int</code> can still use fields, through one table of field names
+  shared by every layout in the program. that only works for a name every
+  layout puts at the same offset. the compiler refuses one they disagree
+  on.
+</p>
+
+<h2 id="splitting-a-program-up"><span class="num">7</span>splitting a program up</h2>
+<h3>include</h3>
+<pre><code>include "jenna.c0";</code></pre>
+<p>
+  pastes another file in as text, before the compiler reads a single token.
+  the file is looked for next to the file including it and then in each
+  <code>-I</code> directory. each file is pasted at most once, so two files can
+  both include a third. a file that ends up including itself is an error.
+</p>
+<h3>embed</h3>
+<pre><code>embed logo "logo.spr";</code></pre>
+<p>
+  puts a file's bytes in the program as data. <code>logo</code> is their
+  address and <code>logo_size</code> their length. the compiler never opens the
+  file, the assembler does, so the compiler's output still depends only on the
+  text it was given.
+</p>
+<h3>extern</h3>
+<pre><code>extern int kernel_end;</code></pre>
+<p>
+  names a symbol defined somewhere else, by the linker or by hand-written
+  assembly. used as a value it is the symbol's address.
+</p>
+
+<h2 id="functions-as-values"><span class="num">8</span>functions as values</h2>
+<p>
+  a function's name without a call after it is its address. calling
+  through a variable that holds one calls whatever it points at. there is no
+  check that the number of arguments fits, since a value carries no
+  description of what it points at. this is how a program keeps a table of
+  handlers or hands a callback to a library.
+</p>
+<pre><code>int twice(int x) { return x * 2; }
+
+int apply(int f, int v) { return f(v); }
+
+int main() { return apply(twice, 21); }</code></pre>
+
+<h2 id="builtins"><span class="num">9</span>builtins</h2>
+<p>
+  there is no standard library. a small set of builtins covers what the
+  language cannot say by itself, each one compiled straight to a few
+  instructions or a system call.
+</p>
+<div class="table-wrap">
+<table>
+  <tr><th>builtin</th><th>what it does</th></tr>
+  <tr><td><code>alloc(n)</code></td><td>n bytes of zeroed memory, as an address</td></tr>
+  <tr><td><code>load8(a)</code> <code>store8(a, v)</code></td><td>read or write one byte</td></tr>
+  <tr><td><code>load32(a)</code> <code>store32(a, v)</code></td><td>read or write four bytes, read zero-extended</td></tr>
+  <tr><td><code>load64(a)</code> <code>store64(a, v)</code></td><td>read or write eight bytes</td></tr>
+  <tr><td><code>print(s)</code></td><td>write a zero-terminated string to standard output</td></tr>
+  <tr><td><code>write(fd, p, n)</code> <code>read(fd, p, n)</code></td><td>the system calls of the same names</td></tr>
+  <tr><td><code>open_read(path)</code> <code>open_write(path)</code> <code>close(fd)</code></td><td>open a file for reading, create or truncate one for writing, close it</td></tr>
+  <tr><td><code>exit(code)</code></td><td>end the process at once</td></tr>
+  <tr><td><code>argc()</code> <code>argv(i)</code></td><td>the argument count and the address of argument <code>i</code></td></tr>
+  <tr><td><code>outb</code> <code>inb</code> <code>outw</code> <code>inw</code></td><td>port input and output, for code that runs in a kernel</td></tr>
+</table>
+</div>
+<p>
+  with <code>--elf</code> a program is built for moonshot's ring 3 instead,
+  and the file and port builtins are refused there. it gets these instead, each
+  a moonshot system call.
+</p>
+<div class="table-wrap">
+<table>
+  <tr><th>builtin</th><th>what it does</th></tr>
+  <tr><td><code>win_info()</code> <code>win_max()</code></td><td>the window's size right now, then the largest it can ever be</td></tr>
+  <tr><td><code>fill</code> <code>blit</code> <code>present</code></td><td>draw a rectangle, copy pixels, show a frame</td></tr>
+  <tr><td><code>key_poll()</code> <code>mouse_poll()</code></td><td>the next key, the mouse's state</td></tr>
+  <tr><td><code>readfile</code> <code>writefile</code></td><td>load and save a file</td></tr>
+  <tr><td><code>dealloc(p)</code></td><td>give back what <code>alloc</code> handed out</td></tr>
+  <tr><td><code>sound</code> <code>glyph</code> <code>ticks()</code></td><td>queue audio, read the kernel's font, read the clock</td></tr>
+  <tr><td><code>syscall(n, a, b, c, d, e)</code></td><td>any system call by number, so a new one needs no compiler change</td></tr>
+</table>
+</div>
+<p>
+  <code>win_info</code> and <code>win_max</code> look like a pair and are not.
+  a program sizes its frame buffer once from <code>win_max</code>, which never
+  changes. it draws only inside <code>win_info</code>, which changes whenever
+  the window manager rearranges the screen.
+</p>
+</main>
+
+</div>
+</body>
+</html>

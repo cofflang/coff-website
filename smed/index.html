@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>coff · smed</title>
+<meta name="description" content="smed: coff's assembler and linker in one tool, why it exists, why it never picks a short encoding and how it is checked against binutils.">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<div class="frame">
+
+<nav class="side" aria-label="contents">
+<a class="brand" href="../index.html"><img src="../favicon.svg" alt="" width="28" height="28">coff</a>
+<ul class="toc">
+<li><a href="../index.html">overview</a>
+</li>
+<li><a href="../start/index.html">getting started</a>
+</li>
+<li><a href="../releases/index.html">releases</a>
+</li>
+<li class="group">reference</li>
+<li><a href="../language/index.html">the c0 language</a>
+</li>
+<li><a href="../compiler/index.html">the compiler</a>
+</li>
+<li><a href="../smed/index.html" aria-current="page">smed, assembler and linker</a>
+</li>
+</ul>
+<p class="side-foot">written by <a href="https://tavro.se">tavro</a><br>part of <a href="https://cofflang.github.io/moonshot-website/">moonshot</a><br>source on <a href="https://github.com/cofflang/coff">github</a></p>
+</nav>
+
+<main class="page">
+<p class="crumb"><a href="../index.html">coff</a> / smed</p>
+<h1>smed</h1>
+<h2 id="why-it-exists"><span class="num">1</span>why it exists</h2>
+<p>
+  coff writes assembly text. for a long time that text went to the system's
+  assembler and linker, which meant those two decided what the final bytes were
+  however carefully the compiler had been checked. they are also the tools Ken
+  Thompson named first when he described the trusting-trust attack, since a
+  compromised assembler sits underneath every compiler on the machine at once.
+  so rather than keep verifying somebody else's tools, coff got its own.
+  smed is one program that assembles and links. it is
+  written in c0, built by coff and builds both coff and itself.
+</p>
+
+<h2 id="one-tool-not-two"><span class="num">2</span>one tool, not two</h2>
+<p>
+  an assembler and a linker are usually separate programs with an object file
+  format between them. smed only ever links code that it assembled in the same
+  run, so the split would buy nothing. it would cost an object format, a
+  symbol table format and relocation records. each of those is one more
+  thing to audit. smed reads assembly and writes the finished executable.
+</p>
+<pre><code>smed [-T linker.ld] [--base ADDR] [-m symbols.map] input.s [more.s ...] output</code></pre>
+
+<h2 id="always-the-wide-form"><span class="num">3</span>always the wide form</h2>
+<p>
+  a normal assembler starts each jump in its short form, finds out that some
+  targets moved out of reach, widens those jumps and goes round again until the
+  layout stops changing. smed always writes the wide form, so the size of an
+  instruction depends only on the instruction. the pass that measures and the
+  pass that writes agree by construction. a whole class of bug that would be
+  very hard to see goes away with the settling loop, at the price of a binary
+  about two percent larger.
+</p>
+
+<h2 id="what-it-reads"><span class="num">4</span>what it reads</h2>
+<p>
+  smed reads the dialect coff writes, intel syntax with the handful of
+  directives coff uses. it also reads the hand-written assembly moonshot boots
+  with, which is a dialect of its own. that code switches the processor from
+  32-bit to 64-bit mode partway through a file. it loads descriptor tables,
+  writes model-specific registers and returns from interrupts. a compiler
+  never emits any of that.
+</p>
+<p>
+  several input files are linked in the order given. sections are buffers
+  laid out once the first pass has seen everything, so three files that each
+  open the same sections in their own order still come out right. with
+  <code>-T</code> the layout comes from a GNU ld linker script, the small
+  subset moonshot's script uses. anything beyond that subset is refused out
+  loud, never ignored. reading the real script means the old tools can still
+  build the kernel from exactly the same inputs, which is what makes comparing
+  the two possible.<span class="sn"><label class="sn-marker" for="sn-smed-4">†</label><input type="checkbox" id="sn-smed-4" class="sn-toggle"><span class="sidenote">one detail cost an hour with no output at all. the first kernel smed linked had no section header table, because nothing needed one. a header count of zero is the ELF convention for a count too large to fit in the field, so the boot loader went looking for a table that was not there and gave up without a word. one all-zero entry satisfies it.</span></span>
+</p>
+
+<h2 id="how-it-is-checked"><span class="num">5</span>how it is checked</h2>
+<p>
+  an assembler that is subtly wrong does not crash. it hands back a program
+  that computes the wrong answer, so smed is compared rather than trusted.
+  <code>smed_tests.sh</code> assembles every c0 program in the tree twice,
+  once with smed and once with binutils. the two binaries have to agree on
+  their exit code and on every byte they print. the compiler smed builds has
+  to reproduce its own assembly byte for byte. when smed assembles itself the
+  result has to behave the same. then the whole compiler suite runs again with
+  no GNU tool anywhere in the pipeline.
+</p>
+<p>
+  the oracle is the tool being replaced, the same trick coff0 plays for coff1.
+  binutils is off every build path, but not off the test bench. flipping one
+  direction bit in one opcode, which keeps the instruction the same length and
+  quietly swaps which operand is written, makes a whole run of programs
+  disagree at once.
+</p>
+
+<h2 id="the-kernel-as-a-test"><span class="num">6</span>the kernel as a test</h2>
+<p>
+  the corpus of c0 programs says nothing about instructions no c0 program
+  emits, such as loading a descriptor table or the far jump into long mode.
+  so when moonshot is checked out next to coff, its kernel is built twice from
+  the very same sources, once by binutils and once by smed. the entry point,
+  the multiboot header and every linker script symbol have to land at the same
+  addresses. the hand-written code is disassembled from both images and
+  compared as a sequence of instructions, 293 of them on both sides, since the
+  encodings differ on purpose.
+</p>
+<p>
+  then the kernel boots and moonshot's test suite runs against it. that suite
+  earned its place as an oracle by being run against six broken
+  copies of smed. three died before the first byte reached the serial line. two
+  more got a screen of text out before the first page fault killed them.
+  the sixth booted all the way to a shell, because the register it corrupted
+  only matters once a user program is interrupted in the middle of a frame,
+  and the game engine's test caught it there.
+</p>
+</main>
+
+</div>
+</body>
+</html>
