@@ -113,14 +113,14 @@ smed [-T linker.ld] [--base addr] [-m symbols.map] input.s [more.s ...] output</
 </p>
 
 <h2 id="running-the-tests"><span class="num">5</span>running the tests</h2>
-<pre><code>./run_tests.sh         # the compiler suite, over five hundred checks
+<pre><code>./run_tests.sh         # the compiler suite, over 370 checks
 ./smed_tests.sh        # smed against binutils, then the suite with no GNU tool
 ./verify_bootstrap.sh  # the trusting-trust audit</code></pre>
 <p>
   every test program goes through the real pipeline and has its exit code
   checked, plus its exact output or exact error message where the test says
-  what those should be. then each stage written in c0 is compared byte for byte
-  with the seed compiler over the whole corpus. last comes the fixpoint, the
+  what those should be. then coff1 is compared byte for byte
+  with the seed compiler over every compile the build makes. last comes the fixpoint, the
   compiler compiling itself three generations deep with every generation
   identical. <code>CC=tcc ./run_tests.sh</code> runs the same suite with gcc
   absent from the machine.

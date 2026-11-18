@@ -86,6 +86,12 @@
   build the kernel from exactly the same inputs, which is what makes comparing
   the two possible.<span class="sn"><label class="sn-marker" for="sn-smed-4">†</label><input type="checkbox" id="sn-smed-4" class="sn-toggle"><span class="sidenote">one detail cost an hour with no output at all. the first kernel smed linked had no section header table, because nothing needed one. a header count of zero is the ELF convention for a count too large to fit in the field, so the boot loader went looking for a table that was not there and gave up without a word. one all-zero entry satisfies it.</span></span>
 </p>
+<p>
+  without a script smed writes a program in two pieces. the code comes first
+  and is marked runnable but not writable. everything else starts on the next
+  page and is marked writable but not runnable. a kernel that honours the
+  marks, as moonshot does, never has a page that is both.
+</p>
 
 <h2 id="how-it-is-checked"><span class="num">5</span>how it is checked</h2>
 <p>
@@ -114,8 +120,8 @@
   the very same sources, once by binutils and once by smed. the entry point,
   the multiboot header and every linker script symbol have to land at the same
   addresses. the hand-written code is disassembled from both images and
-  compared as a sequence of instructions, 293 of them on both sides, since the
-  encodings differ on purpose.
+  compared as a sequence of instructions, which must be the same on both
+  sides, since the encodings differ on purpose.
 </p>
 <p>
   then the kernel boots and moonshot's test suite runs against it. that suite
@@ -123,8 +129,8 @@
   copies of smed. three died before the first byte reached the serial line. two
   more got a screen of text out before the first page fault killed them.
   the sixth booted all the way to a shell, because the register it corrupted
-  only matters once a user program is interrupted in the middle of a frame,
-  and the game engine's test caught it there.
+  only matters once a user program is interrupted in the middle of a frame.
+  the game engine's test caught it there.
 </p>
 </main>
 

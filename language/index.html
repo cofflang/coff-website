@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>coff · the c0 language</title>
-<meta name="description" content="reference for c0: its one type, statements, operators, layouts, includes and every builtin, as of coff v0.6.0.">
+<meta name="description" content="reference for c0: its one type, statements, operators, layouts, includes and every builtin, as of coff v0.8.0.">
 <link rel="icon" href="../favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="../style.css">
 </head>
@@ -49,7 +49,10 @@
   it starts at <code>main</code>, which takes nothing and returns an
   <code>int</code> that becomes the exit code of the process. there is no
   runtime underneath it. the code coff emits starts with a few instructions
-  that call <code>main</code> and exit with what it returned.
+  that call <code>main</code> and exit with what it returned. that entry
+  point is called <code>_start</code>, so no function, extern or embed may have
+  that name. a <code>main</code> declared to return two values is refused as
+  well.
 </p>
 <pre><code>int total = 0;
 
@@ -109,11 +112,26 @@ continue;</code></pre>
 <pre><code>x = expression;
 buf[i] = expression;
 e.field = expression;
-x += 1;   x -= n;   x *= 2;   x /= 2;   x %= 10;</code></pre>
+x += 1;   x -= n;   x *= 2;   x /= 2;   x %= 10;
+x &amp;= 255;   x |= 1;   x ^= m;   x &lt;&lt;= 2;   x &gt;&gt;= 1;</code></pre>
 <p>
   assignment is a statement and not an expression, so it cannot hide inside
-  a condition. <code>x += n</code> means exactly <code>x = x + (n)</code>. the rest of
-  the family works the same way.
+  a condition. the ten compound forms are <code>+=</code>, <code>-=</code>,
+  <code>*=</code>, <code>/=</code>, <code>%=</code>, <code>&amp;=</code>,
+  <code>|=</code>, <code>^=</code>, <code>&lt;&lt;=</code> and
+  <code>&gt;&gt;=</code>. each works on a local, a global, a
+  <code>buf[i]</code> and an <code>e.field</code>. <code>x += n</code> means exactly
+  <code>x = x + (n)</code>. the lexer always takes the longest operator it can,
+  so <code>x&lt;&lt;=2</code> is one shift-assign and not a shift followed by
+  an assignment.
+</p>
+<p>
+  with <code>buf[i] += v</code> or <code>e.field += v</code> the buffer and the
+  index, or the record, are worked out once. the old value is read before
+  the right side runs. <code>b[f()] += 1</code> calls <code>f</code> one time.
+  the address is also taken before the right side runs, the same as with a
+  plain <code>=</code>. if the right side moves the block that a global base
+  points to, the store lands in the old block.<span class="sn"><label class="sn-marker" for="sn-language-1">†</label><input type="checkbox" id="sn-language-1" class="sn-toggle"><span class="sidenote">before v0.8.0 <code>b[f()] += 1</code> called <code>f</code> twice.</span></span>
 </p>
 <h3>two return values</h3>
 <pre><code>(int, int) divide(int a, int b) {
@@ -143,7 +161,9 @@ q, r = divide(17, 5);</code></pre>
   that comes before it in the text. its expressions are worked out at the
   moment it runs, so it sees variables as they are then. that is why the
   example sets <code>buf</code> to 0 first, since giving back 0 does nothing.
-  a deferred statement may not itself return, break, continue or defer.
+  a deferred statement may not itself return, break, continue or defer. it
+  may not use a variable declared in an inner block either, since that block
+  has ended by the time the defer runs.
 </p>
 <h3>return</h3>
 <pre><code>return;
@@ -188,6 +208,7 @@ return a, b;</code></pre>
   (<code>"hello\n"</code>), with the escapes <code>\n</code>, <code>\t</code>,
   <code>\\</code> and <code>\"</code>. a string is stored
   with a zero byte after it and its value is its address.
+  a number too large for 64 bits keeps its low 64 bits.
   <code>//</code> starts a comment that runs to the end of the line.
 </p>
 
@@ -228,8 +249,8 @@ int main() {
 <p>
   pastes another file in as text, before the compiler reads a single token.
   the file is looked for next to the file including it and then in each
-  <code>-I</code> directory. each file is pasted at most once, so two files can
-  both include a third. a file that ends up including itself is an error.
+  <code>-I</code> directory. each file is pasted at most once, however its path is
+  written, so two files can both include a third. a file that ends up including itself is an error.
 </p>
 <h3>embed</h3>
 <pre><code>embed logo "logo.spr";</code></pre>
@@ -260,7 +281,29 @@ int apply(int f, int v) { return f(v); }
 
 int main() { return apply(twice, 21); }</code></pre>
 
-<h2 id="builtins"><span class="num">9</span>builtins</h2>
+<h2 id="doubles"><span class="num">9</span>doubles</h2>
+<p>
+  c0 has no floating-point type, so doubles come from a library, flyt, in
+  <code>lib/flyt.c0</code>. a double is an <code>int</code> holding the 64 bits
+  of an IEEE 754 number. <code>include "flyt.c0";</code> with
+  <code>-I lib</code> brings it in.
+</p>
+<pre><code>int buf = alloc(340);
+int third = f64_div(f64_from_int(1), f64_from_int(3));
+int n = f64_format(third, buf, 6);   // writes 0.333333 into buf</code></pre>
+<p>
+  <code>f64_add</code>, <code>f64_sub</code>, <code>f64_mul</code>,
+  <code>f64_div</code> and <code>f64_sqrt</code> round to nearest with ties to
+  even, the way a processor does. signed zeros, subnormal numbers, infinities
+  and NaN behave as the standard says. <code>f64_from_int</code> and
+  <code>f64_to_int</code> convert. <code>f64_lt</code>, <code>f64_le</code> and
+  <code>f64_eq</code> compare. <code>f64_parse</code> and
+  <code>f64_format</code> read and write decimal text, exactly rounded.
+  <code>lib/flyt_check.sh</code> compares the library with the machine's own
+  doubles over about 49,000 cases.
+</p>
+
+<h2 id="builtins"><span class="num">10</span>builtins</h2>
 <p>
   there is no standard library. a small set of builtins covers what the
   language cannot say by itself, each one compiled straight to a few
@@ -282,9 +325,11 @@ int main() { return apply(twice, 21); }</code></pre>
 </table>
 </div>
 <p>
-  with <code>--elf</code> a program is built for moonshot's ring 3 instead,
-  and the file and port builtins are refused there. it gets these instead, each
-  a moonshot system call.
+  with <code>--elf</code> a program is built for moonshot's ring 3 instead.
+  port input and output are refused there. <code>open_read</code>,
+  <code>open_write</code>, <code>read</code>, <code>write</code> and
+  <code>close</code> are moonshot's own file calls, so the same program opens
+  files on both. it also gets these, each a moonshot system call.
 </p>
 <div class="table-wrap">
 <table>
